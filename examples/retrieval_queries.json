@@ -1,0 +1,4 @@
+[
+ {"query_id":"query-a","relevant":["item-1","item-3"],"relevance_source":"independent-label-v1","candidates":["item-1","item-2"],"ranked":["item-2","item-1"],"latency_ms":3.5},
+ {"query_id":"query-b","relevant":["item-2"],"relevance_source":"independent-label-v1","candidates":["item-2","item-3"],"ranked":["item-2","item-3"],"latency_ms":4.1}
+]

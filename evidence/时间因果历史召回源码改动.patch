@@ -1,0 +1,544 @@
+--- a/项目/AI_ML_DL/src/movielens_data.py
++++ b/项目/AI_ML_DL/src/movielens_data.py
+@@ -75,6 +75,49 @@
+         return result
+ 
+ 
++    def query_cohort_audit(self, stage: str) -> dict:
++        """Separate training-ID coverage, usable history, and catalogue support.
++
++        Does not inspect labels beyond the chosen evaluation stage.
++        This is a diagnostic, not an improvement in NDCG or an unbiased CTR estimate.
++        """
++        future = self.validation if stage == "validation" else self.test if stage == "test" else None
++        if future is None:
++            raise ValueError("stage must be validation or test")
++        history = self.prefix(stage)
++        catalog = set(map(int, self.catalog))
++        trained = set(map(int, self.train[self.train[:, 2] >= 4, 0]))
++        cohorts = {name: [] for name in (
++            "trained_id", "history_only", "no_positive_history",
++            "history_items_not_in_training_catalog", "no_evaluable_future_positive")}
++        evaluable_queries = []
++        for user in sorted(set(map(int, future[:, 0]))):
++            past = history[history[:, 0] == user]
++            seen = set(map(int, past[:, 1]))
++            known_positive = set(map(int, past[past[:, 2] >= 4, 1]))
++            usable_history = known_positive & catalog
++            future_positive = set(map(int, future[(future[:, 0] == user) & (future[:, 2] >= 4), 1]))
++            evaluable = (future_positive & catalog) - seen
++            if not evaluable:
++                cohorts["no_evaluable_future_positive"].append(user)
++                continue
++            if user in trained:
++                cohort = "trained_id"
++            elif usable_history:
++                cohort = "history_only"
++            elif known_positive:
++                cohort = "history_items_not_in_training_catalog"
++            else:
++                cohort = "no_positive_history"
++            cohorts[cohort].append(user)
++            ordered_known = [int(i) for i in past[past[:, 2] >= 4, 1] if int(i) in catalog]
++            evaluable_queries.append({"user": user, "cohort": cohort, "seen": seen,
++                                      "known_positive": ordered_known, "relevant": evaluable})
++        return {"stage": stage, "future_users": int(len(set(future[:, 0]))),
++                "counts": {name: len(users) for name, users in cohorts.items()},
++                "user_ids": cohorts, "queries": evaluable_queries}
++
++
+ def load(path: Path) -> TemporalData:
+     raw = path.read_bytes()
+     ratings = np.loadtxt(path, dtype=np.int64, delimiter="\t", ndmin=2)
+--- a/项目/AI_ML_DL/src/recommender.py
++++ b/项目/AI_ML_DL/src/recommender.py
+@@ -102,8 +102,13 @@
+     baseline_user_vectors: np.ndarray | None = None
+     baseline_item_vectors: np.ndarray | None = None
+     baseline_similarity: np.ndarray | None = None
++    history_item_vectors: np.ndarray | None = None
++    history_projection: np.ndarray | None = None
++    history_max_items: int = 32
+ 
+     def __post_init__(self):
++        if self.history_max_items < 1:
++            raise ValueError("history_max_items must be positive")
+         if (self.user_vectors.ndim != 2 or self.item_vectors.ndim != 2 or
+             self.user_vectors.shape[1] != self.item_vectors.shape[1] or
+             len(self.catalog) == 0 or len(np.unique(self.catalog)) != len(self.catalog) or
+@@ -119,6 +124,57 @@
+         self.exact.add(vectors)
+         self.hnsw.add(vectors)
+         self.hnsw.hnsw.efSearch = self.ef_search
++        self._make_history_indexes()
++
++    def _make_history_indexes(self):
++        self.history_exact = self.history_hnsw = None
++        if self.history_item_vectors is None and self.history_projection is None:
++            return
++        if self.history_item_vectors is None or self.history_projection is None:
++            raise ValueError("history encoder is missing a component")
++        dim = self.history_item_vectors.shape[1] if self.history_item_vectors.ndim == 2 else 0
++        if (not dim or self.history_item_vectors.shape[0] != len(self.item_vectors) or
++            self.history_projection.shape != (dim, dim) or
++            not np.isfinite(self.history_item_vectors).all() or
++            not np.isfinite(self.history_projection).all()):
++            raise ValueError("invalid history encoder representation")
++        vectors = np.ascontiguousarray(self.history_item_vectors[self.catalog], dtype=np.float32)
++        self.history_exact = faiss.IndexFlatIP(dim)
++        self.history_exact.add(vectors)
++        self.history_hnsw = faiss.IndexHNSWFlat(dim, 16, faiss.METRIC_INNER_PRODUCT)
++        self.history_hnsw.hnsw.efConstruction = 80
++        self.history_hnsw.hnsw.efSearch = self.ef_search
++        self.history_hnsw.add(vectors)
++
++    def attach_history_encoder(self, model):
++        self.history_max_items = model.max_history
++        self.history_item_vectors = model.items.weight.detach().cpu().numpy().copy()
++        self.history_projection = model.projection.weight.detach().cpu().numpy().copy()
++        self._make_history_indexes()
++
++    def history_query(self, known_positives: list[int] | tuple[int, ...]) -> np.ndarray:
++        if self.history_item_vectors is None:
++            raise ValueError("inductive history model not trained")
++        if not isinstance(known_positives, (list, tuple)):
++            raise ValueError("positive history requires a timestamp-ordered sequence")
++        allowed = set(self.catalog.tolist())
++        known = [int(item) for item in known_positives if int(item) in allowed][-self.history_max_items:]
++        if not known:
++            raise ValueError("no known positive history for inductive retrieval")
++        pooled = self.history_item_vectors[known].mean(axis=0)
++        return np.asarray(self.history_projection @ pooled, dtype=np.float32)
++
++    def history_retrieve(self, known_positives: list[int] | tuple[int, ...], seen: set[int],
++                         budget: int, approximate: bool) -> np.ndarray:
++        if not 1 <= budget <= len(self.catalog):
++            raise ValueError("invalid retrieval budget")
++        q = self.history_query(known_positives)[None, :]
++        index = self.history_hnsw if approximate else self.history_exact
++        count = min(len(self.catalog), budget + len(seen))
++        _, positions = index.search(np.ascontiguousarray(q), count)
++        ids = [int(self.catalog[p]) for p in positions[0] if p >= 0
++               and int(self.catalog[p]) not in seen]
++        return np.asarray(ids[:budget], dtype=np.int64)
+ 
+     @classmethod
+     def from_training(cls, data: TemporalData, model: Retriever) -> "Engine":
+@@ -147,10 +203,17 @@
+         return np.asarray(candidates[:budget], dtype=np.int64)
+ 
+     def recommend(self, user: int, seen: set[int], budget: int = 100,
+-                  method: str = "hnsw_ranker", top: int = 10) -> tuple[np.ndarray, np.ndarray]:
++                  method: str = "hnsw_ranker", top: int = 10,
++                  history_positive: list[int] | tuple[int, ...] | None = None) -> tuple[np.ndarray, np.ndarray]:
+         if not 0 < user < len(self.user_vectors) or type(top) is not int or top <= 0:
+             raise ValueError("unknown user or invalid result count")
+-        if method in ("popularity", "item_knn", "mf80_exact"):
++        if method in ("history_exact", "history_hnsw"):
++            if history_positive is None:
++                raise ValueError("positive history must be supplied separately from all rated items")
++            vector = self.history_query(history_positive)
++            ids = self.history_retrieve(history_positive, seen, budget, method == "history_hnsw")
++            scores = self.history_item_vectors[ids] @ vector
++        elif method in ("popularity", "item_knn", "mf80_exact"):
+             ids = np.asarray([int(i) for i in self.catalog if int(i) not in seen], dtype=np.int64)
+             if method == "popularity":
+                 scores = self.popularity[ids]
+@@ -182,12 +245,19 @@
+         folder.mkdir(parents=True, exist_ok=True)
+         state = {name: getattr(self, name) for name in (
+             "user_vectors", "item_vectors", "catalog", "popularity", "user_counts", "interaction",
+-            "similarity", "baseline_user_vectors", "baseline_item_vectors", "baseline_similarity")}
++            "similarity", "baseline_user_vectors", "baseline_item_vectors", "baseline_similarity",
++            "history_item_vectors", "history_projection")}
+         np.savez_compressed(folder / "retrieval.npz", **{k: v for k, v in state.items() if v is not None})
+         self.ranker.save_model(str(folder / "ranker.txt"))
+         faiss.write_index(self.hnsw, str(folder / "hnsw.index"))
+-        hashes = {n: sha256((folder / n).read_bytes()).hexdigest() for n in ("retrieval.npz", "ranker.txt", "hnsw.index")}
+-        manifest = {"schema": "two-stage-recommender.v2", "ef_search": self.ef_search,
++        names = ["retrieval.npz", "ranker.txt", "hnsw.index"]
++        if self.history_hnsw is not None:
++            faiss.write_index(self.history_hnsw, str(folder / "history_hnsw.index"))
++            names.append("history_hnsw.index")
++        hashes = {n: sha256((folder / n).read_bytes()).hexdigest() for n in names}
++        manifest = {"history_max_items": self.history_max_items,
++                    "schema": "two-stage-recommender.v3" if self.history_hnsw is not None
++                    else "two-stage-recommender.v2", "ef_search": self.ef_search,
+                     "sha256": hashes, **metadata}
+         (folder / "model.json").write_text(json.dumps(manifest, indent=2) + "\n")
+         return manifest
+@@ -195,19 +265,30 @@
+     @classmethod
+     def load(cls, folder: Path) -> "Engine":
+         manifest = json.loads((folder / "model.json").read_text())
+-        if manifest.get("schema") != "two-stage-recommender.v2":
++        if manifest.get("schema") not in ("two-stage-recommender.v2", "two-stage-recommender.v3"):
+             raise ValueError("unsupported model schema")
+-        for name in ("retrieval.npz", "ranker.txt", "hnsw.index"):
++        names = ["retrieval.npz", "ranker.txt", "hnsw.index"]
++        if manifest["schema"] == "two-stage-recommender.v3":
++            names.append("history_hnsw.index")
++        for name in names:
+             if sha256((folder / name).read_bytes()).hexdigest() != manifest["sha256"][name]:
+                 raise ValueError("model/index version mismatch: " + name)
+         with np.load(folder / "retrieval.npz", allow_pickle=False) as z:
+             state = {name: z[name].copy() for name in z.files}
+         engine = cls(**state, ranker=lgb.Booster(model_file=str(folder / "ranker.txt")),
+-                     ef_search=int(manifest["ef_search"]))
++                     ef_search=int(manifest["ef_search"]),
++                     history_max_items=int(manifest.get("history_max_items", 32)))
+         index = faiss.read_index(str(folder / "hnsw.index"))
+         if index.d != engine.item_vectors.shape[1] or index.ntotal != len(engine.catalog):
+             raise ValueError("index/representation shape mismatch")
+         engine.hnsw = index
++        if manifest["schema"] == "two-stage-recommender.v3":
++            if engine.history_hnsw is None:
++                raise ValueError("missing inductive history parameters")
++            history_index = faiss.read_index(str(folder / "history_hnsw.index"))
++            if history_index.d != engine.history_item_vectors.shape[1] or history_index.ntotal != len(engine.catalog):
++                raise ValueError("history index/representation shape mismatch")
++            engine.history_hnsw = history_index
+         return engine
+ 
+ 
+--- a/项目/AI_ML_DL/src/recommender_cli.py
++++ b/项目/AI_ML_DL/src/recommender_cli.py
+@@ -14,6 +14,7 @@
+ import torch
+ from .movielens_data import load, download
+ from .recommender import Engine, evaluate, fit_retriever, fit_ranker, interaction_statistics, metrics
++from .history_retrieval import fit_history_encoder
+ 
+ 
+ def train(data_path: Path, destination: Path, seed: int, epochs: int):
+@@ -23,6 +24,9 @@
+     model, losses = fit_retriever(data, seed=seed, epochs=epochs)
+     engine = Engine.from_training(data, model)
+     engine.ranker = fit_ranker(data, engine, seed)
++    history_model, history_losses, history_examples = fit_history_encoder(
++        data.train, data.catalog, data.items, seed=seed, epochs=max(1, min(epochs, 8)))
++    engine.attach_history_encoder(history_model)
+     development = np.concatenate((data.train, data.rank_train))
+     simple_model, simple_losses = fit_retriever(replace(data, train=development), seed=seed, epochs=epochs)
+     engine.baseline_user_vectors = simple_model.users.weight.detach().numpy().copy()
+@@ -65,6 +69,7 @@
+                            [len(data.train), len(data.rank_train), len(data.validation), len(data.test)])),
+         "catalog": len(data.catalog), "dimension": 48, "selected": selected,
+         "training_seconds": elapsed, "training_loss": losses, "mf80_training_loss": simple_losses,
++        "history_encoder_training_loss": history_losses, "history_encoder_examples": history_examples,
+         "knn_validation_selection": knn_validations,
+         "created_utc": datetime.now(timezone.utc).isoformat(),
+         "versions": {p: version(p) for p in ("torch", "numpy", "faiss-cpu", "lightgbm")},
+--- a/项目/AI_ML_DL/src/recommender_service.py
++++ b/项目/AI_ML_DL/src/recommender_service.py
+@@ -16,6 +16,8 @@
+     engine = Engine.load(model_folder)
+     prefix = data.prefix("test")
+     histories = {int(u): set(prefix[prefix[:, 0] == u, 1].tolist()) for u in set(prefix[:, 0].tolist())}
++    positive_histories = {int(u): prefix[(prefix[:, 0] == u) & (prefix[:, 2] >= 4), 1].tolist()
++                          for u in set(prefix[:, 0].tolist())}
+     trained = set(data.train[data.train[:, 2] >= 4, 0].tolist())
+     app = FastAPI(title="Two-stage recommendation research service")
+ 
+@@ -25,10 +27,18 @@
+ 
+     @app.get("/recommend/{user}")
+     def recommend(user: int, budget: int = Query(100, ge=10, le=200)):
+-        if user not in trained:
+-            raise HTTPException(422, "cold user: no trained user representation")
+-        ids, scores = engine.recommend(user, histories.get(user, set()), budget)
++        if not 0 < user < len(engine.user_vectors):
++            raise HTTPException(422, "unknown user ID")
++        if user in trained:
++            method = "hnsw_ranker"
++        elif engine.history_item_vectors is not None and (set(positive_histories.get(user, [])) & set(engine.catalog)):
++            method = "history_hnsw"
++        else:
++            raise HTTPException(422, "no trained ID and no usable known positive history")
++        ids, scores = engine.recommend(user, histories.get(user, set()), budget,
++                                       method=method, history_positive=positive_histories.get(user, []))
+         return {"user": user, "budget": budget, "model_seed": manifest["seed"],
++                "representation": "history_encoder" if method == "history_hnsw" else "trained_user_id",
+                 "items": [{"item": int(i), "score": float(s)} for i, s in zip(ids, scores)]}
+ 
+     return app
+--- /dev/null
++++ b/项目/AI_ML_DL/src/history_retrieval.py
+@@ -0,0 +1,146 @@
++"""Inductive, time-causal history retrieval for users without trained ID embeddings.
++
++Research feature; implicit BPR negatives are unobserved, not established dislikes.
++Train examples use strictly earlier timestamps within the 65% training split.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++import numpy as np
++import torch
++from torch import nn
++import torch.nn.functional as F
++
++
++@dataclass(frozen=True)
++class HistoryExample:
++    target: int
++    context: tuple[int, ...]
++    excluded: frozenset[int]
++    timestamp: int
++    user: int
++
++
++def history_examples(records: np.ndarray, catalog: np.ndarray, max_history: int = 32) -> list[HistoryExample]:
++    """Build examples WITHOUT showing an event any item at its own timestamp.
++
++    Catalog membership is frozen to the retriever's training-period items.
++    Concurrent positive items cannot be sampled as negatives.
++    """
++    if max_history < 1:
++        raise ValueError('max_history must be positive')
++    allowed = {int(i) for i in catalog}
++    if not allowed:
++        raise ValueError('empty training catalog')
++    if records.ndim != 2 or records.shape[1] != 4:
++        raise ValueError('expected user,item,rating,timestamp records')
++    ordered = records[np.argsort(records[:, 3], kind='stable')]
++    prior_positive: dict[int, list[int]] = {}
++    prior_seen: dict[int, set[int]] = {}
++    examples: list[HistoryExample] = []
++    # Cross-user timestamp ties and same-user timestamp ties are handled alike:
++    # snapshot precedes the entire timestamp group, not each line within it.
++    for group in np.split(ordered, np.flatnonzero(np.diff(ordered[:, 3])) + 1):
++        same_time_positive: dict[int, set[int]] = {}
++        for user, item, rating, _ in group:
++            if rating >= 4 and int(item) in allowed:
++                same_time_positive.setdefault(int(user), set()).add(int(item))
++        for user, item, rating, timestamp in group:
++            user, item = int(user), int(item)
++            history = prior_positive.get(user, [])
++            if rating >= 4 and item in allowed and history:
++                exclusions = frozenset(prior_seen.get(user, set()) | same_time_positive.get(user, set()))
++                examples.append(HistoryExample(item, tuple(history[-max_history:]), exclusions,
++                                               int(timestamp), user))
++        for user, item, rating, _ in group:
++            user, item = int(user), int(item)
++            prior_seen.setdefault(user, set()).add(item)
++            if rating >= 4 and item in allowed:
++                prior_positive.setdefault(user, []).append(item)
++    return examples
++
++
++class HistoryEncoder(nn.Module):
++    """Shared item factors + learned history-to-query projection; no user ID table."""
++
++    def __init__(self, items: int, dim: int = 32, max_history: int = 32):
++        super().__init__()
++        if max_history < 1:
++            raise ValueError("max_history must be positive")
++        self.max_history = max_history
++        self.items = nn.Embedding(items, dim)
++        self.projection = nn.Linear(dim, dim, bias=False)
++        nn.init.normal_(self.items.weight, std=.05)
++        nn.init.eye_(self.projection.weight)
++
++    def query(self, history: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
++        if history.ndim != 2 or history.shape != valid.shape or not valid.any(dim=1).all():
++            raise ValueError('each query requires at least one usable positive item')
++        embeddings = self.items(history) * valid.unsqueeze(-1)
++        pooled = embeddings.sum(1) / valid.sum(1).unsqueeze(-1)
++        return self.projection(pooled)
++
++    @torch.no_grad()
++    def encode(self, history: list[int] | tuple[int, ...],
++               catalog: np.ndarray) -> np.ndarray:
++        if not isinstance(history, (list, tuple)):
++            raise ValueError("history must be timestamp ordered")
++        allowed = set(int(i) for i in catalog)
++        useful = [int(i) for i in history if int(i) in allowed][-self.max_history:]
++        if not useful:
++            raise ValueError('no known positive history for inductive retrieval')
++        values = torch.tensor(useful, dtype=torch.long)[None, :]
++        result = self.query(values, torch.ones_like(values, dtype=torch.bool))
++        return result[0].cpu().numpy().astype(np.float32)
++
++
++def fit_history_encoder(records: np.ndarray, catalog: np.ndarray, items: int,
++                        seed: int, epochs: int = 8, dim: int = 32,
++                        max_history: int = 32) -> tuple[HistoryEncoder, list[float], int]:
++    """Train using 65%-period event prefixes only; return model/loss/sample count."""
++    if epochs < 1 or dim < 1:
++        raise ValueError('epochs/dim must be positive')
++    examples = history_examples(records, catalog, max_history)
++    if not examples:
++        raise ValueError('no strictly historical positive-prefix examples')
++    catalogue = np.asarray(catalog, dtype=np.int64)
++    candidates = [(e, np.asarray(sorted(set(catalogue.tolist()) - e.excluded), dtype=np.int64))
++                  for e in examples]
++    candidates = [(e, neg) for e, neg in candidates if len(neg)]
++    if not candidates:
++        raise ValueError('no available proxy negatives')
++    torch.manual_seed(seed)
++    rng = np.random.default_rng(seed)
++    model = HistoryEncoder(items, dim, max_history=max_history)
++    opt = torch.optim.AdamW(model.parameters(), lr=.01, weight_decay=.01)
++    loss_trace: list[float] = []
++    model.train()
++    for _ in range(epochs):
++        epoch_total = 0.
++        for part in np.array_split(rng.permutation(len(candidates)),
++                                   max(1, (len(candidates) + 255) // 256)):
++            selected = [candidates[int(i)] for i in part]
++            batch = len(selected)
++            width = max(len(e.context) for e, _ in selected)
++            context = np.zeros((batch, width), dtype=np.int64)
++            mask = np.zeros((batch, width), dtype=bool)
++            pos = np.empty(batch, dtype=np.int64)
++            neg = np.empty(batch, dtype=np.int64)
++            for i, (example, negatives) in enumerate(selected):
++                n = len(example.context)
++                context[i, :n] = example.context
++                mask[i, :n] = True
++                pos[i] = example.target
++                neg[i] = rng.choice(negatives)
++            q = model.query(torch.from_numpy(context), torch.from_numpy(mask))
++            positive = model.items(torch.from_numpy(pos))
++            negative = model.items(torch.from_numpy(neg))
++            loss = F.softplus(-((q * (positive - negative)).sum(-1))).mean()
++            if not torch.isfinite(loss):
++                raise FloatingPointError('nonfinite inductive loss')
++            opt.zero_grad(set_to_none=True)
++            loss.backward()
++            opt.step()
++            epoch_total += float(loss.detach()) * batch
++        loss_trace.append(epoch_total / len(candidates))
++    return model.eval(), loss_trace, len(candidates)
+--- /dev/null
++++ b/项目/AI_ML_DL/tests/test_history_retrieval.py
+@@ -0,0 +1,78 @@
++"""Independent tests that run without FAISS; FAISS integration has a separate gate."""
++import numpy as np
++import pytest
++from src.history_retrieval import HistoryEncoder, fit_history_encoder, history_examples
++
++
++def data():
++    # Same-time items for user 1 may not train on one another.
++    return np.asarray([
++        [1, 1, 5, 10], [1, 2, 5, 11], [1, 3, 5, 11],
++        [1, 4, 5, 12], [2, 2, 5, 10], [2, 4, 5, 11],
++        [3, 5, 5, 50],
++    ], dtype=np.int64)
++
++
++def test_same_timestamp_never_enters_query_context():
++    examples = history_examples(data(), np.arange(1, 7))
++    tie = [e for e in examples if e.user == 1 and e.timestamp == 11]
++    assert len(tie) == 2
++    assert all(e.context == (1,) for e in tie)
++    assert all({2, 3} <= e.excluded for e in tie)
++    assert next(e for e in examples if e.user == 1 and e.timestamp == 12).context == (1, 2, 3)
++
++
++def test_catalogue_and_strict_time_boundaries():
++    examples = history_examples(data(), np.array([1, 2, 3, 4]))
++    assert all(all(item in (1, 2, 3, 4) for item in e.context) for e in examples)
++    assert not any(e.user == 3 for e in examples)
++    assert not any(e.target == 5 for e in examples)
++
++
++def test_inductive_train_query_generalizes_without_user_id():
++    model, trace, samples = fit_history_encoder(data(), np.arange(1, 7), 7, 81, epochs=10, dim=8)
++    assert samples >= 3 and len(trace) == 10
++    assert all(np.isfinite(trace))
++    # A new user with known positive history can query the same item geometry.
++    known = model.encode([1, 2], np.arange(1, 7))
++    assert known.shape == (8,) and np.isfinite(known).all()
++    assert np.array_equal(known, model.encode([1, 2], np.arange(1, 7)))
++    with pytest.raises(ValueError, match='no known positive history'):
++        model.encode([99], np.arange(1, 7))
++
++
++def test_rejects_training_with_no_history_and_empty_catalogue():
++    with pytest.raises(ValueError, match='no strictly historical'):
++        fit_history_encoder(data()[:1], np.arange(1, 7), 7, 1)
++    with pytest.raises(ValueError, match='empty training catalog'):
++        history_examples(data(), np.asarray([], dtype=int))
++
++
++def test_cohort_diagnostic_covers_usable_history_not_just_trained_ids():
++    from src.movielens_data import TemporalData
++    train = np.asarray([[1, 1, 5, 1], [1, 2, 5, 2], [2, 1, 1, 2]], dtype=np.int64)
++    rank = np.asarray([[2, 1, 5, 3], [3, 9, 5, 3]], dtype=np.int64)
++    validation = np.asarray([[4, 1, 2, 4]], dtype=np.int64)
++    test = np.asarray([[1, 1, 5, 5], [2, 2, 5, 5], [3, 2, 5, 5], [4, 2, 5, 5]], dtype=np.int64)
++    example = TemporalData(train, rank, validation, test, 5, 10, np.array([1,2]), (2,4,5), 'fixture')
++    result = example.query_cohort_audit('test')
++    # User 1 is trained, but no *new* catalogue positive: repeated item 1
++    assert result['counts']['no_evaluable_future_positive'] == 1
++    assert result['counts']['history_only'] == 1
++    assert result['counts']['history_items_not_in_training_catalog'] == 1
++    assert result['counts']['no_positive_history'] == 1
++    assert next(q for q in result['queries'] if q['user'] == 2)['known_positive'] == [1]
++
++
++def test_history_encode_uses_prefix_order_and_last_32():
++    encoder = HistoryEncoder(items=40, dim=4)
++    allow = np.arange(1, 40)
++    a = encoder.encode(list(range(1, 36)), allow)
++    b = encoder.encode(list(range(4, 36)), allow)
++    assert np.allclose(a, b)
++
++
++def test_history_sequence_required_not_unordered_set():
++    model = HistoryEncoder(7, dim=4)
++    with pytest.raises(ValueError, match='timestamp ordered'):
++        model.encode({1, 2}, np.arange(1, 7))
+--- /dev/null
++++ b/项目/AI_ML_DL/tests/test_history_model_contract.py
+@@ -0,0 +1,47 @@
++"""Native FAISS + ranker integration contracts (NOT RUN without pinned FAISS)."""
++import json
++import numpy as np
++import pytest
++
++pytest.importorskip('faiss', reason='native FAISS dependency unavailable')
++from src.recommender import Engine
++
++
++def example_engine():
++    import lightgbm as lgb
++    training = np.arange(50, dtype=np.float64).reshape(10, 5)
++    ranker = lgb.train({'objective':'regression','verbosity':-1,'num_threads':1,
++                        'min_data_in_leaf':1,'min_data_in_bin':1},
++                       lgb.Dataset(training, label=np.arange(10)), num_boost_round=2)
++    item = np.asarray([[0,0],[1,0],[.8,.2],[.4,.6],[0,1]], dtype=np.float32)
++    history_item = np.asarray([[0,0],[1,0],[.8,.2],[.4,.6],[0,1]], dtype=np.float32)
++    return Engine(np.zeros((4, 2), dtype=np.float32), item, np.arange(1, 5),
++                  np.ones(5), np.ones(4), np.zeros((4, 5), dtype=np.float32),
++                  np.zeros((5, 5), dtype=np.float32), ranker=ranker,
++                  history_item_vectors=history_item,history_projection=np.eye(2,dtype=np.float32))
++
++
++def test_history_only_user_exact_and_hnsw_never_return_consumed():
++    engine = example_engine()
++    exact,_ = engine.recommend(3,{1},3,'history_exact',history_positive=[1])
++    near,_ = engine.recommend(3,{1},3,'history_hnsw',history_positive=[1])
++    assert len(exact)==len(near)==3
++    assert set(exact)==set(near)=={2,3,4}
++    with pytest.raises(ValueError,match='timestamp-ordered'):
++        engine.recommend(3,{1},3,'history_exact',history_positive={1})
++    with pytest.raises(ValueError,match='no known positive history'):
++        engine.recommend(3,{1},3,'history_exact',history_positive=[])
++
++
++def test_v3_persistence_and_inductive_index_integrity(tmp_path):
++    engine = example_engine()
++    expected = engine.recommend(3,{1},3,'history_exact',history_positive=[1])
++    manifest = engine.save(tmp_path,{'seed':81,'input_sha256':'test-fixture'})
++    assert manifest['schema']=='two-stage-recommender.v3'
++    assert 'history_hnsw.index' in manifest['sha256']
++    actual = Engine.load(tmp_path).recommend(3,{1},3,'history_exact',history_positive=[1])
++    np.testing.assert_array_equal(actual[0],expected[0])
++    np.testing.assert_allclose(actual[1],expected[1])
++    p=tmp_path/'history_hnsw.index';p.write_bytes(p.read_bytes()+b'tampered')
++    with pytest.raises(ValueError,match='version mismatch'):
++        Engine.load(tmp_path)

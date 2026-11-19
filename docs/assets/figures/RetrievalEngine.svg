@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 610" role="img" aria-label="RetrievalEngine对照图：旧Python 47.60毫秒，密集NumPy 38.21毫秒，向量化19.70毫秒；397次查询全部与Exact Top-10一致。">
+    <style>text{font-family: "Noto Sans CJK SC","Microsoft YaHei",sans-serif; fill:#163347}.title{font-size:34px;font-weight:700}.sub{font-size:18px}.number{font-size:27px;font-weight:700}.label{font-size:20px;font-weight:600}.foot{font-size:17px;fill:#566b7d}</style>
+    <rect width="1160" height="610" fill="#f7fafc"/><rect x="42" y="40" width="1076" height="528" rx="20" fill="#fff" stroke="#d9e3e9"/>
+    <text class="title" x="84" y="104">Exact Top-10一致性与CPU批次耗时</text>
+    <text class="sub" x="84" y="142">Digits/PCA24代理 · 1400向量 · 397次查询 · K=10 · 7轮中位数 · BLAS单线程</text>
+    <line x1="98" y1="410" x2="1050" y2="410" stroke="#b4c7d2" stroke-width="2"/>
+    <rect x="125" y="203" width="190" height="207" rx="6" fill="#52758d"/><text x="220" y="185" class="number" text-anchor="middle">47.60 ms</text><text x="220" y="450" class="label" text-anchor="middle">旧Python路径</text><rect x="435" y="244" width="190" height="166" rx="6" fill="#95aabb"/><text x="530" y="226" class="number" text-anchor="middle">38.21 ms</text><text x="530" y="450" class="label" text-anchor="middle">密集NumPy精算</text><rect x="745" y="325" width="190" height="85" rx="6" fill="#196a83"/><text x="840" y="307" class="number" text-anchor="middle">19.70 ms</text><text x="840" y="450" class="label" text-anchor="middle">量化证书·向量化</text>
+    <text x="84" y="508" class="foot">397/397查询与密集精确Top-10一致；计时是397次查询批次总耗时，并非单请求延迟。</text>
+    <text x="84" y="540" class="foot">数据：evidence/certified_quantized_vectorization_benchmark.json · 非FAISS/线上SLA竞争结论</text>
+    </svg>

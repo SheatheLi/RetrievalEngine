@@ -1,0 +1,75 @@
+{
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+    "-m",
+    "src.recommender_service",
+    "--model",
+    "models/seed7",
+    "--data",
+    "/workspace/scratch/77b84c736146/work/datasets/ml-100k/u.data",
+    "--port",
+    "36299"
+  ],
+  "health": {
+    "status": "ready",
+    "model_sha256": {
+      "retrieval.npz": "841e8917e330debf3e628e3265519be43bc54baa747d3477afd7ee17b995f58b",
+      "ranker.txt": "74fdca528d74c8eb944c52e6dc4a4ebb265b4251330b5e63bb27b0cce34daa31",
+      "hnsw.index": "a0e52db3855bf08552509cca3a339bd1ca574b8e8b32c60d3e40eb51f0072384"
+    },
+    "input_sha256": "06416e597f82b7342361e41163890c81036900f418ad91315590814211dca490"
+  },
+  "response": {
+    "user": 1,
+    "budget": 100,
+    "model_seed": 7,
+    "items": [
+      {
+        "item": 302,
+        "score": 2.016780218625269
+      },
+      {
+        "item": 405,
+        "score": 1.9754710551844563
+      },
+      {
+        "item": 483,
+        "score": 1.9244021599327181
+      },
+      {
+        "item": 275,
+        "score": 1.8571907807141752
+      },
+      {
+        "item": 748,
+        "score": 1.7889821408292268
+      },
+      {
+        "item": 318,
+        "score": 1.7779114238555094
+      },
+      {
+        "item": 475,
+        "score": 1.475488866506228
+      },
+      {
+        "item": 288,
+        "score": 1.3898694510599952
+      },
+      {
+        "item": 431,
+        "score": 1.2075248523626947
+      },
+      {
+        "item": 410,
+        "score": 1.1699127257588342
+      }
+    ]
+  },
+  "known_seen_recommended": 0,
+  "cold_and_invalid_statuses": [
+    422,
+    422
+  ],
+  "result": "PASS_REAL_LOOPBACK_HTTP"
+}

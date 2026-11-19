@@ -1,0 +1,9 @@
+{
+  "source": "sklearn.datasets.load_digits (public digits proxy, not recommendation)",
+  "index_items": 1400,
+  "queries": 397,
+  "approx_recall_at_10": 0.9720403022670026,
+  "certified_recall_at_10": 1.0,
+  "certified_mean_dot_products": 972.823677581864,
+  "exact_dot_products": 1400
+}

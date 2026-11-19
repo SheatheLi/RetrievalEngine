@@ -1,0 +1,15 @@
+{
+  "dataset": "sklearn_digits_PCA24_proxy_not_recommendation",
+  "items": 1400,
+  "queries": 397,
+  "exact_top10_matches": 397,
+  "old_cluster_exact_dot_mean": 972.823677581864,
+  "quantized_bound_exact_dot_mean": 11.035264483627204,
+  "quantized_all_coarse_dot_count_per_query": 1400,
+  "quantized_full_precision_ratio": 0.007882331774019431,
+  "quantized_python_elapsed_s": 0.08028890100013086,
+  "numpy_full_scan_elapsed_s": 0.03437771400058409,
+  "quantized_code_bytes": 33600,
+  "original_float64_bytes": 268800,
+  "warning": "all coarse dot-products and sorting remain; do not claim speedup from rescoring reduction"
+}

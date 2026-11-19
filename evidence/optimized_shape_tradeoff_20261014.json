@@ -1,0 +1,42 @@
+{
+  "torch": "2.10.0+cpu",
+  "backend": "torch.compile with FX eager backend on CPU",
+  "scenario": "fixed 3 graph shapes, 10 variable lengths, 2 batch items, masked SDPA attention",
+  "objective": "minimize padded tokens with identical specialization budget",
+  "rows": [
+    {
+      "policy": "static_power_two",
+      "boundaries": [
+        8,
+        16,
+        32,
+        64
+      ],
+      "graph_compiles": 3,
+      "input_tokens": 328,
+      "padded_tokens": 416,
+      "max_output_error": 1.1920928955078125e-07,
+      "cpu_eager_ms_median": 1.9674510003824253,
+      "cpu_eager_ms_min": 1.7430940006306628,
+      "cpu_eager_ms_max": 2.350947999730124
+    },
+    {
+      "policy": "optimized_dp",
+      "boundaries": [
+        9,
+        17,
+        32
+      ],
+      "graph_compiles": 3,
+      "input_tokens": 328,
+      "padded_tokens": 382,
+      "max_output_error": 1.1920928955078125e-07,
+      "cpu_eager_ms_median": 1.912298000206647,
+      "cpu_eager_ms_min": 1.8603999997139908,
+      "cpu_eager_ms_max": 2.3428659997080103
+    }
+  ],
+  "boundaries_from_holdout_traffic": false,
+  "deployment_cap": 32,
+  "limitation": "same sequence-length sample used to choose optimal buckets; must be tested on future distribution shift"
+}

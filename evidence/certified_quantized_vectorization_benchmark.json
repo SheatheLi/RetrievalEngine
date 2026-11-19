@@ -1,0 +1,58 @@
+{
+  "dataset": "sklearn_digits_PCA24_proxy_not_user_item_recommendation",
+  "index_items": 1400,
+  "queries": 397,
+  "k": 10,
+  "rounds": 7,
+  "python": "3.13.5",
+  "numpy": "2.3.5",
+  "os": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "threads_env": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1"
+  },
+  "times_seconds_by_round": {
+    "previous": [
+      0.04760268499921949,
+      0.0509920519998559,
+      0.04650891200071783,
+      0.04798742799903266,
+      0.05956653700013703,
+      0.04441992200008826,
+      0.04472171300039918
+    ],
+    "vectorized": [
+      0.0314676199996029,
+      0.03198982699905173,
+      0.020977469999706955,
+      0.019422280998696806,
+      0.019701239998539677,
+      0.01804220899975917,
+      0.019188968999515055
+    ],
+    "dense_float64": [
+      0.04336285299905285,
+      0.03623601800063625,
+      0.038211904000490904,
+      0.0360162870001659,
+      0.03953970499969728,
+      0.04026787700058776,
+      0.03536167800120893
+    ]
+  },
+  "median_times_seconds": {
+    "previous": 0.04760268499921949,
+    "vectorized": 0.019701239998539677,
+    "dense_float64": 0.038211904000490904
+  },
+  "median_previous_over_vectorized": 2.416227861939044,
+  "median_dense_over_vectorized": 1.9395684740312438,
+  "mean_exact_scoring_count": {
+    "previous": 11.035264483627204,
+    "vectorized": 12.249370277078086,
+    "dense_float64": 1400.0
+  },
+  "all_methods_match_dense_topk": true,
+  "limitations": "Synthetic normalized handwritten-digit vectors. This does not establish ANN production throughput, hardware portability, or real recommender relevance."
+}

@@ -1,0 +1,10 @@
+{
+  "eager_graphs": 9,
+  "bucket_graphs": 3,
+  "num_lengths": 10,
+  "max_error": 1.7881393432617188e-07,
+  "total_true_tokens": 328,
+  "total_bucket_tokens": 416,
+  "exact_execution_ms": 9.000993000881863,
+  "bucket_execution_ms": 2.4378870002692565
+}

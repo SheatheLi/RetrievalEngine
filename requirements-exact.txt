@@ -1,0 +1,6 @@
+# For serving/verifying *existing* v2/v3 saved models by exact NumPy scoring.
+# Not a replacement for requirements-recommender.txt (native FAISS main route).
+numpy>=2.0,<3
+lightgbm>=4.6,<5
+fastapi>=0.115,<1
+uvicorn>=0.30,<1

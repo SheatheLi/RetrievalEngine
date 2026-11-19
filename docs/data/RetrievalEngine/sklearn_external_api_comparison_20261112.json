@@ -1,0 +1,63 @@
+{
+  "scope": "397 queries × 1400 float64 PCA24 normalized digits vectors, k=10, 7 repeat rounds; external sklearn nearest neighbors exact brute; toy public dataset, not production",
+  "env": {
+    "python": "3.13.5",
+    "numpy": "2.3.5",
+    "sklearn": "1.8.0",
+    "openblas": "1",
+    "os": "Linux-6.18.57-x86_64-with-glibc2.41"
+  },
+  "baselines": [
+    "project certified quantization",
+    "NumPy full exact scan",
+    "scikit-learn NearestNeighbors brute single-query",
+    "scikit-learn NearestNeighbors brute batched"
+  ],
+  "sklearn_fit_seconds": 0.0005059640000126819,
+  "exact_match_count": 397,
+  "seconds_by_round": {
+    "certified_vectorized_single": [
+      0.018765487999871766,
+      0.018716692999987572,
+      0.018276889000162555,
+      0.01778388399998221,
+      0.0191012039999805,
+      0.018065839999962918,
+      0.01800547900006677
+    ],
+    "numpy_dense_single": [
+      0.03397365799992258,
+      0.03430803399987781,
+      0.03402475600000798,
+      0.034481766999988395,
+      0.034593875999917145,
+      0.03398344300012468,
+      0.0340683629999603
+    ],
+    "sklearn_exact_brute_single": [
+      0.05046337799990397,
+      0.05447575999983201,
+      0.05307925000010982,
+      0.0514547750001384,
+      0.0521381390001352,
+      0.050513342999920496,
+      0.05161427600000934
+    ]
+  },
+  "batch_sklearn_seconds_by_round": [
+    0.002640029000076538,
+    0.0026690139998208906,
+    0.002742004000083398,
+    0.002601100999982009,
+    0.002730916000018624,
+    0.002654602000120576,
+    0.002950659000134692
+  ],
+  "median_seconds": {
+    "certified_vectorized_single": 0.018276889000162555,
+    "numpy_dense_single": 0.0340683629999603,
+    "sklearn_exact_brute_single": 0.05161427600000934,
+    "sklearn_exact_brute_batch": 0.0026690139998208906
+  },
+  "notes": "All methods returned exactly equal ordered indices under this dataset. sklearn batch amortizes per-request overhead; batch API is not same latency contract as single-query. No claim to beat FAISS/HNSW/online service."
+}

@@ -1,0 +1,104 @@
+{
+  "torch": "2.10.0+cpu",
+  "device": "CPU",
+  "backend": "torch.compile(eager,dynamic=True,fullgraph=True)",
+  "rows": [
+    {
+      "kind": "scatter_src",
+      "width": 2,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_src",
+      "width": 3,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_src",
+      "width": 5,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_src",
+      "width": 11,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_add",
+      "width": 2,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_add",
+      "width": 3,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_add",
+      "width": 5,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_add",
+      "width": 11,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_value",
+      "width": 2,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_value",
+      "width": 3,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_value",
+      "width": 5,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    },
+    {
+      "kind": "scatter_value",
+      "width": 11,
+      "native_compiled": "FAIL",
+      "native_error": "TorchRuntimeError",
+      "compat_equal_to_eager": true,
+      "out_identity": true
+    }
+  ],
+  "scope": "User-space semantic rewrite with allocation+copy; not a native PyTorch patch."
+}
