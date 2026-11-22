@@ -1,5 +1,7 @@
 # RetrievalEngine
 
+[**在线交互展示**](https://sheatheli.github.io/RetrievalEngine/) · [**工程证据与验证索引**](docs/verification-map.md) · [![Smoke CI](https://github.com/SheatheLi/RetrievalEngine/actions/workflows/smoke.yml/badge.svg)](https://github.com/SheatheLi/RetrievalEngine/actions/workflows/smoke.yml)
+
 > 将向量召回、量化残差界和精确Top-K认证结合的可执行检索研究系统。项目同时审查**排名正确性、候选计算量、CPU运行时间和API调用粒度**，避免用单个“加速比”替代全部性能结论。
 
 **工程状态：** Python检索与推荐算法实验、模型工件、回归测试及代理数据基准。未证明面向线上推荐业务、FAISS/HNSW或大规模GPU部署的通用性能优势。
